@@ -62,6 +62,13 @@ def extract_text_from_docx(file):
     text = "\n".join([para.text for para in doc.paragraphs])
     return text
 
+# Funkce na zkrácení textu na max. 5000 tokenů (~4000 slov)
+def truncate_text(text, max_words=4000):
+    words = text.split()
+    if len(words) > max_words:
+        return " ".join(words[-max_words:])  # Posledních X slov
+    return text
+
 # Endpoint pro nahrání více souborů najednou
 @app.post("/upload/")
 async def upload_files(files: list[UploadFile] = File(...)):
@@ -125,6 +132,9 @@ async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...
     if not context:
         return {"error": "❌ Žádné soubory nebyly nalezeny!"}
 
-    prompt = f"Dokumenty:\n{context}\n\nOtázka: {user_input}\nOdpověď:"
+    # Zkrácení textu, aby se vešel do limitu 5000 tokenů
+    truncated_context = truncate_text(context)
+
+    prompt = f"Dokumenty:\n{truncated_context}\n\nOtázka: {user_input}\nOdpověď:"
     response_text = ask_groq(prompt)
     return {"response": response_text}
