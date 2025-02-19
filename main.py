@@ -62,8 +62,8 @@ def extract_text_from_docx(file):
     text = "\n".join([para.text for para in doc.paragraphs])
     return text
 
-# Funkce na zkrácení textu na max. 5000 tokenů (~4000 slov)
-def truncate_text(text, max_words=4000):
+# Funkce na zkrácení textu na max. 3000 slov (~3750 tokenů)
+def truncate_text(text, max_words=3000):
     words = text.split()
     if len(words) > max_words:
         return " ".join(words[-max_words:])  # Posledních X slov
@@ -109,12 +109,12 @@ def ask_groq(prompt):
         if "choices" in response_json and len(response_json["choices"]) > 0:
             return response_json["choices"][0]["message"]["content"]
         elif "error" in response_json:
-            return f"Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
+            return f"❌ Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
         else:
-            return "Chyba: Neočekávaný formát odpovědi od API."
+            return "❌ Chyba: Neočekávaný formát odpovědi od API."
 
     except requests.exceptions.RequestException as e:
-        return f"Chyba při komunikaci s AI: {str(e)}"
+        return f"❌ Chyba při komunikaci s AI: {str(e)}"
 
 @app.post("/chat/")
 async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...)):
@@ -132,7 +132,7 @@ async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...
     if not context:
         return {"error": "❌ Žádné soubory nebyly nalezeny!"}
 
-    # Zkrácení textu, aby se vešel do limitu 5000 tokenů
+    # Zkrácení textu na 3000 slov
     truncated_context = truncate_text(context)
 
     prompt = f"Dokumenty:\n{truncated_context}\n\nOtázka: {user_input}\nOdpověď:"
