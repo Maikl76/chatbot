@@ -7,29 +7,34 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h2>Nahraj dokument</h2>
-    <input type="file" id="fileInput">
-    <button onclick="uploadFile()">Nahrát</button>
+    <h2>Nahraj dokumenty</h2>
+    <input type="file" id="fileInput" multiple>
+    <button onclick="uploadFiles()">Nahrát</button>
 
     <h2>Chat</h2>
     <input type="text" id="userInput" placeholder="Zadej otázku...">
     <button onclick="sendMessage()">Odeslat</button>
 
+    <h3>Nahrané soubory:</h3>
+    <ul id="fileList"></ul>
+
     <p id="response"></p>
 
     <script>
         let apiUrl = "https://chatbot-ybmh.onrender.com"; // Backend na Renderu
-        let uploadedFileName = "";
+        let uploadedFileNames = "";
 
-        async function uploadFile() {
-            let fileInput = document.getElementById("fileInput").files[0];
-            if (!fileInput) {
-                alert("Vyber soubor k nahrání.");
+        async function uploadFiles() {
+            let fileInput = document.getElementById("fileInput").files;
+            if (fileInput.length === 0) {
+                alert("Vyber soubory k nahrání.");
                 return;
             }
 
             let formData = new FormData();
-            formData.append("file", fileInput);
+            for (let i = 0; i < fileInput.length; i++) {
+                formData.append("files", fileInput[i]);
+            }
 
             let response = await fetch(`${apiUrl}/upload/`, {
                 method: "POST",
@@ -37,27 +42,32 @@
             });
 
             let result = await response.json();
-            if (result.filename) {
-                uploadedFileName = result.filename;
-                alert("Soubor nahrán!");
+            if (result.filenames) {
+                uploadedFileNames = result.filenames.join(",");
+                alert("Soubory nahrány!");
+
+                // Aktualizace seznamu nahraných souborů
+                let fileList = document.getElementById("fileList");
+                fileList.innerHTML = "";
+                result.filenames.forEach(filename => {
+                    let li = document.createElement("li");
+                    li.textContent = filename;
+                    fileList.appendChild(li);
+                });
             } else {
-                alert("Chyba při nahrávání: " + (result.error || "Neznámá chyba."));
+                alert("Chyba při nahrávání.");
             }
         }
 
         async function sendMessage() {
             let userInput = document.getElementById("userInput").value;
-            if (!uploadedFileName) {
-                alert("Nejdříve nahraj soubor.");
-                return;
-            }
-            if (!userInput.trim()) {
-                alert("Zadej otázku.");
+            if (!uploadedFileNames) {
+                alert("Nejdříve nahraj soubory.");
                 return;
             }
 
             let formData = new FormData();
-            formData.append("filename", uploadedFileName);
+            formData.append("filenames", uploadedFileNames);
             formData.append("user_input", userInput);
 
             let response = await fetch(`${apiUrl}/chat/`, {
