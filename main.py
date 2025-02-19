@@ -17,6 +17,10 @@ API_URL = "https://api.groq.com/v1/chat/completions"  # Groq API
 # Inicializace FastAPI
 app = FastAPI()
 
+# Kontrola, zda existuje složka 'static' (aby nedošlo k chybě)
+if not os.path.exists("static"):
+    os.makedirs("static")
+
 # Nastavení složky pro HTML šablony
 templates = Jinja2Templates(directory="templates")
 
