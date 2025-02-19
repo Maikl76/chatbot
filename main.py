@@ -5,7 +5,7 @@ import openai
 import os
 from dotenv import load_dotenv
 
-# Načtení API klíče
+# Načtení API klíče z .env souboru
 load_dotenv()
 API_KEY = os.getenv("OPENAI_API_KEY")  # Pokud používáš OpenRouter nebo Groq, změň na správný klíč
 API_URL = "https://api.openai.com/v1/chat/completions"  # Upravit podle API poskytovatele
@@ -17,7 +17,9 @@ def extract_text_from_pdf(file):
     text = ""
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
-            text += page.extract_text() + "\n"
+            extracted_text = page.extract_text()
+            if extracted_text:
+                text += extracted_text + "\n"
     return text
 
 # Funkce pro extrakci textu z Word dokumentu
@@ -26,7 +28,7 @@ def extract_text_from_docx(file):
     text = "\n".join([para.text for para in doc.paragraphs])
     return text
 
-# Uložení souboru do paměti
+# Uložení souborů do paměti
 uploaded_files = {}
 
 @app.post("/upload/")
@@ -61,11 +63,3 @@ async def chat_with_file(filename: str = Form(...), user_input: str = Form(...))
     )
 
     return {"response": response["choices"][0]["message"]["content"]}
-
----
-
-### **Krok 2: Spuštění backendu**  
-V terminálu spusť:  
-```bash
-uvicorn main:app --reload
-
