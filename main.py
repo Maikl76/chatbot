@@ -11,8 +11,15 @@ from dotenv import load_dotenv
 
 # Načtení API klíče z .env souboru
 load_dotenv()
-API_KEY = os.getenv("GROQ_API_KEY")  # Použij svůj API klíč z Groq
-API_URL = "https://api.groq.com/openai/v1/chat/completions"  # ✅ Opravená URL
+API_KEY = os.getenv("GROQ_API_KEY")
+
+# Debugging API klíče
+if API_KEY:
+    print("✅ API klíč načten:", API_KEY[:5] + "..." + API_KEY[-5:])  # Skrýt část klíče
+else:
+    print("❌ Chyba: API klíč se nenačetl! Zkontroluj .env nebo Render Environment Variables.")
+
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Inicializace FastAPI
 app = FastAPI()
@@ -69,11 +76,13 @@ async def upload_file(file: UploadFile = File(...)):
 
 # Funkce pro volání Groq API
 def ask_groq(prompt):
+    if not API_KEY:
+        return "❌ Chyba: API klíč není načten. Ověř proměnnou GROQ_API_KEY."
+
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     data = {
-        "model": "mixtral-8x7b-32768",  # Použití Groq Mixtral (zdarma)
-        "messages": [{"role": "system", "content": "Jsi asistent odpovídající na otázky k dokumentům."},
-                     {"role": "user", "content": prompt}]
+        "model": "mixtral-8x7b-32768",
+        "messages": [{"role": "user", "content": prompt}]
     }
 
     try:
@@ -83,22 +92,21 @@ def ask_groq(prompt):
         # DEBUGGING: Loguj celou odpověď z API do Render Logs
         print("GROQ RESPONSE:", response_json)
 
-        # Ověř, zda odpověď obsahuje správná data
         if "choices" in response_json and len(response_json["choices"]) > 0:
             return response_json["choices"][0]["message"]["content"]
         elif "error" in response_json:
-            return f"Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
+            return f"❌ Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
         else:
-            return "Chyba: Neočekávaný formát odpovědi od API."
+            return "❌ Chyba: Neočekávaný formát odpovědi od API."
 
     except requests.exceptions.RequestException as e:
-        print("Chyba při volání API:", str(e))
-        return "Chyba při komunikaci s AI modelem."
+        print("❌ Chyba při volání API:", str(e))
+        return "❌ Chyba při komunikaci s AI modelem."
 
 @app.post("/chat/")
 async def chat_with_file(filename: str = Form(...), user_input: str = Form(...)):
     if filename not in uploaded_files:
-        return {"error": "Soubor nenalezen"}
+        return {"error": "❌ Soubor nenalezen"}
 
     context = uploaded_files[filename]
     prompt = f"Dokument:\n{context}\n\nOtázka: {user_input}\nOdpověď:"
