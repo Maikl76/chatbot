@@ -62,8 +62,8 @@ def extract_text_from_docx(file):
     text = "\n".join([para.text for para in doc.paragraphs])
     return text
 
-# Funkce na zkrácení textu na max. 3000 slov (~3750 tokenů)
-def truncate_text(text, max_words=3000):
+# Funkce na zkrácení textu na max. 2000 slov (~2500 tokenů)
+def truncate_text(text, max_words=2000):
     words = text.split()
     if len(words) > max_words:
         return " ".join(words[-max_words:])  # Posledních X slov
@@ -132,7 +132,7 @@ async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...
     if not context:
         return {"error": "❌ Žádné soubory nebyly nalezeny!"}
 
-    # Zkrácení textu na 3000 slov
+    # Zkrácení textu na 2000 slov (~2500 tokenů)
     truncated_context = truncate_text(context)
 
     prompt = f"Dokumenty:\n{truncated_context}\n\nOtázka: {user_input}\nOdpověď:"
