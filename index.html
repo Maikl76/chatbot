@@ -17,14 +17,20 @@
     <p id="response"></p>
 
     <script>
+        let apiUrl = "https://chatbot-ybmh.onrender.com"; // URL backendu na Renderu
         let uploadedFileName = "";
 
         async function uploadFile() {
             let fileInput = document.getElementById("fileInput").files[0];
+            if (!fileInput) {
+                alert("Vyber soubor k nahrání.");
+                return;
+            }
+
             let formData = new FormData();
             formData.append("file", fileInput);
 
-            let response = await fetch("http://127.0.0.1:8000/upload/", {
+            let response = await fetch(`${apiUrl}/upload/`, {
                 method: "POST",
                 body: formData
             });
@@ -34,17 +40,26 @@
                 uploadedFileName = result.filename;
                 alert("Soubor nahrán!");
             } else {
-                alert("Chyba při nahrávání.");
+                alert("Chyba při nahrávání: " + (result.error || "Neznámá chyba."));
             }
         }
 
         async function sendMessage() {
             let userInput = document.getElementById("userInput").value;
+            if (!uploadedFileName) {
+                alert("Nejdříve nahraj soubor.");
+                return;
+            }
+            if (!userInput.trim()) {
+                alert("Zadej otázku.");
+                return;
+            }
+
             let formData = new FormData();
             formData.append("filename", uploadedFileName);
             formData.append("user_input", userInput);
 
-            let response = await fetch("http://127.0.0.1:8000/chat/", {
+            let response = await fetch(`${apiUrl}/chat/`, {
                 method: "POST",
                 body: formData
             });
@@ -55,4 +70,3 @@
     </script>
 </body>
 </html>
-
