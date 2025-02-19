@@ -1,14 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, Form
 import pdfplumber
 import docx
-import openai
+import requests
 import os
 from dotenv import load_dotenv
 
 # Načtení API klíče z .env souboru
 load_dotenv()
-API_KEY = os.getenv("OPENAI_API_KEY")  # Pokud používáš OpenRouter nebo Groq, změň na správný klíč
-API_URL = "https://api.openai.com/v1/chat/completions"  # Upravit podle API poskytovatele
+API_KEY = os.getenv("GROQ_API_KEY")  # Použij svůj API klíč z Groq/OpenRouter
+API_URL = "https://api.groq.com/v1/chat/completions"  # Upravit podle API poskytovatele
 
 app = FastAPI()
 
@@ -47,6 +47,17 @@ async def upload_file(file: UploadFile = File(...)):
     uploaded_files[file.filename] = text
     return {"message": "Soubor nahrán", "filename": file.filename}
 
+# Funkce pro volání Groq API
+def ask_groq(prompt):
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    data = {
+        "model": "mixtral-8x7b-32768",  # Použití Groq Mixtral (zdarma)
+        "messages": [{"role": "system", "content": "Jsi asistent odpovídající na otázky k dokumentům."},
+                     {"role": "user", "content": prompt}]
+    }
+    response = requests.post(API_URL, headers=headers, json=data)
+    return response.json()["choices"][0]["message"]["content"]
+
 @app.post("/chat/")
 async def chat_with_file(filename: str = Form(...), user_input: str = Form(...)):
     if filename not in uploaded_files:
@@ -54,12 +65,6 @@ async def chat_with_file(filename: str = Form(...), user_input: str = Form(...))
 
     context = uploaded_files[filename]
     prompt = f"Dokument:\n{context}\n\nOtázka: {user_input}\nOdpověď:"
-
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",  # Pokud používáš Groq/OpenRouter, uprav na jejich model
-        messages=[{"role": "system", "content": "Jsi asistent odpovídající na otázky k dokumentům."},
-                  {"role": "user", "content": prompt}],
-        api_key=API_KEY
-    )
-
-    return {"response": response["choices"][0]["message"]["content"]}
+    
+    response_text = ask_groq(prompt)
+    return {"response": response_text}
