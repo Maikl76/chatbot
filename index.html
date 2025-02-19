@@ -1,1 +1,58 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot s dokumenty</title>
+</head>
+<body>
+    <h2>Nahraj dokument</h2>
+    <input type="file" id="fileInput">
+    <button onclick="uploadFile()">Nahrát</button>
+
+    <h2>Chat</h2>
+    <input type="text" id="userInput" placeholder="Zadej otázku...">
+    <button onclick="sendMessage()">Odeslat</button>
+
+    <p id="response"></p>
+
+    <script>
+        let uploadedFileName = "";
+
+        async function uploadFile() {
+            let fileInput = document.getElementById("fileInput").files[0];
+            let formData = new FormData();
+            formData.append("file", fileInput);
+
+            let response = await fetch("http://127.0.0.1:8000/upload/", {
+                method: "POST",
+                body: formData
+            });
+
+            let result = await response.json();
+            if (result.filename) {
+                uploadedFileName = result.filename;
+                alert("Soubor nahrán!");
+            } else {
+                alert("Chyba při nahrávání.");
+            }
+        }
+
+        async function sendMessage() {
+            let userInput = document.getElementById("userInput").value;
+            let formData = new FormData();
+            formData.append("filename", uploadedFileName);
+            formData.append("user_input", userInput);
+
+            let response = await fetch("http://127.0.0.1:8000/chat/", {
+                method: "POST",
+                body: formData
+            });
+
+            let result = await response.json();
+            document.getElementById("response").innerText = result.response || "Chyba při zpracování.";
+        }
+    </script>
+</body>
+</html>
 
