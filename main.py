@@ -1,4 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.requests import Request
 import pdfplumber
 import docx
 import requests
@@ -7,10 +11,22 @@ from dotenv import load_dotenv
 
 # Načtení API klíče z .env souboru
 load_dotenv()
-API_KEY = os.getenv("GROQ_API_KEY")  # Použij svůj API klíč z Groq/OpenRouter
-API_URL = "https://api.groq.com/v1/chat/completions"  # Upravit podle API poskytovatele
+API_KEY = os.getenv("GROQ_API_KEY")  # Použij svůj API klíč z Groq
+API_URL = "https://api.groq.com/v1/chat/completions"  # Groq API
 
+# Inicializace FastAPI
 app = FastAPI()
+
+# Nastavení složky pro HTML šablony
+templates = Jinja2Templates(directory="templates")
+
+# Servírování statických souborů (např. CSS, JS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Hlavní stránka – zobrazí index.html
+@app.get("/", response_class=HTMLResponse)
+async def serve_home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 # Funkce pro extrakci textu z PDF
 def extract_text_from_pdf(file):
