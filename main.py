@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 # Načtení API klíče z .env souboru
 load_dotenv()
 API_KEY = os.getenv("GROQ_API_KEY")  # Použij svůj API klíč z Groq
-API_URL = "https://api.groq.com/v1/chat/completions"  # Groq API
+API_URL = "https://api.groq.com/openai/v1/chat/completions"  # ✅ Opravená URL
 
 # Inicializace FastAPI
 app = FastAPI()
