@@ -7,26 +7,33 @@ import pdfplumber
 import docx
 import requests
 import os
+import sqlite3
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, Column, String, Text
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Načtení API klíče z .env souboru
 load_dotenv()
 API_KEY = os.getenv("GROQ_API_KEY")
-
-# Debugging API klíče
-if API_KEY:
-    print("✅ API klíč načten:", API_KEY[:5] + "..." + API_KEY[-5:])  # Skrýt část klíče
-else:
-    print("❌ Chyba: API klíč se nenačetl! Zkontroluj .env nebo Render Environment Variables.")
-
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Inicializace FastAPI
 app = FastAPI()
 
-# Kontrola, zda existuje složka 'static' (aby nedošlo k chybě)
-if not os.path.exists("static"):
-    os.makedirs("static")
+# Nastavení SQLite databáze
+DATABASE_URL = "sqlite:///./files.db"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+
+# Definice tabulky pro soubory
+class FileModel(Base):
+    __tablename__ = "files"
+    filename = Column(String, primary_key=True)
+    content = Column(Text, nullable=False)
+
+# Vytvoření tabulky, pokud neexistuje
+Base.metadata.create_all(bind=engine)
 
 # Nastavení složky pro HTML šablony
 templates = Jinja2Templates(directory="templates")
@@ -55,30 +62,34 @@ def extract_text_from_docx(file):
     text = "\n".join([para.text for para in doc.paragraphs])
     return text
 
-# Uložení souborů do paměti
-uploaded_files = {}
-
+# Endpoint pro nahrání více souborů najednou
 @app.post("/upload/")
-async def upload_file(file: UploadFile = File(...)):
-    # Zjištění typu souboru
-    file_ext = file.filename.split(".")[-1]
-    text = ""
+async def upload_files(files: list[UploadFile] = File(...)):
+    session = SessionLocal()
+    uploaded_filenames = []
 
-    if file_ext == "pdf":
-        text = extract_text_from_pdf(file.file)
-    elif file_ext == "docx":
-        text = extract_text_from_docx(file.file)
-    else:
-        return {"error": "Nepodporovaný formát. Použij PDF nebo DOCX."}
+    for file in files:
+        file_ext = file.filename.split(".")[-1]
+        text = ""
 
-    uploaded_files[file.filename] = text
-    return {"message": "Soubor nahrán", "filename": file.filename}
+        if file_ext == "pdf":
+            text = extract_text_from_pdf(file.file)
+        elif file_ext == "docx":
+            text = extract_text_from_docx(file.file)
+        else:
+            continue  # Nepodporovaný formát
+
+        # Uložit do databáze
+        file_entry = FileModel(filename=file.filename, content=text)
+        session.merge(file_entry)  # Pokud už existuje, aktualizuje ho
+        uploaded_filenames.append(file.filename)
+
+    session.commit()
+    session.close()
+    return {"message": "Soubory nahrány", "filenames": uploaded_filenames}
 
 # Funkce pro volání Groq API
 def ask_groq(prompt):
-    if not API_KEY:
-        return "❌ Chyba: API klíč není načten. Ověř proměnnou GROQ_API_KEY."
-
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     data = {
         "model": "mixtral-8x7b-32768",
@@ -88,31 +99,32 @@ def ask_groq(prompt):
     try:
         response = requests.post(API_URL, headers=headers, json=data)
         response_json = response.json()
-
-        # DEBUGGING: Loguj celou odpověď z API do Render Logs
-        print("GROQ RESPONSE:", response_json)
-
         if "choices" in response_json and len(response_json["choices"]) > 0:
             return response_json["choices"][0]["message"]["content"]
         elif "error" in response_json:
-            return f"❌ Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
+            return f"Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
         else:
-            return "❌ Chyba: Neočekávaný formát odpovědi od API."
+            return "Chyba: Neočekávaný formát odpovědi od API."
 
     except requests.exceptions.RequestException as e:
-        print("❌ Chyba při volání API:", str(e))
-        return "❌ Chyba při komunikaci s AI modelem."
+        return f"Chyba při komunikaci s AI: {str(e)}"
 
 @app.post("/chat/")
-async def chat_with_file(filename: str = Form(...), user_input: str = Form(...)):
-    if filename not in uploaded_files:
-        return {"error": "❌ Soubor nenalezen"}
+async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...)):
+    session = SessionLocal()
+    file_names_list = filenames.split(",")
+    context = ""
 
-    context = uploaded_files[filename]
-    prompt = f"Dokument:\n{context}\n\nOtázka: {user_input}\nOdpověď:"
+    for filename in file_names_list:
+        file_entry = session.query(FileModel).filter(FileModel.filename == filename.strip()).first()
+        if file_entry:
+            context += f"\n\n=== {filename} ===\n{file_entry.content}"
 
-    # DEBUGGING: Loguj prompt do Render Logs
-    print("GENEROVANÝ PROMPT:", prompt)
+    session.close()
 
+    if not context:
+        return {"error": "❌ Žádné soubory nebyly nalezeny!"}
+
+    prompt = f"Dokumenty:\n{context}\n\nOtázka: {user_input}\nOdpověď:"
     response_text = ask_groq(prompt)
     return {"response": response_text}
