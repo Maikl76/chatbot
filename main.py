@@ -75,8 +75,25 @@ def ask_groq(prompt):
         "messages": [{"role": "system", "content": "Jsi asistent odpovídající na otázky k dokumentům."},
                      {"role": "user", "content": prompt}]
     }
-    response = requests.post(API_URL, headers=headers, json=data)
-    return response.json()["choices"][0]["message"]["content"]
+
+    try:
+        response = requests.post(API_URL, headers=headers, json=data)
+        response_json = response.json()
+
+        # DEBUGGING: Loguj celou odpověď z API do Render Logs
+        print("GROQ RESPONSE:", response_json)
+
+        # Ověř, zda odpověď obsahuje správná data
+        if "choices" in response_json and len(response_json["choices"]) > 0:
+            return response_json["choices"][0]["message"]["content"]
+        elif "error" in response_json:
+            return f"Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
+        else:
+            return "Chyba: Neočekávaný formát odpovědi od API."
+
+    except requests.exceptions.RequestException as e:
+        print("Chyba při volání API:", str(e))
+        return "Chyba při komunikaci s AI modelem."
 
 @app.post("/chat/")
 async def chat_with_file(filename: str = Form(...), user_input: str = Form(...)):
@@ -85,6 +102,9 @@ async def chat_with_file(filename: str = Form(...), user_input: str = Form(...))
 
     context = uploaded_files[filename]
     prompt = f"Dokument:\n{context}\n\nOtázka: {user_input}\nOdpověď:"
-    
+
+    # DEBUGGING: Loguj prompt do Render Logs
+    print("GENEROVANÝ PROMPT:", prompt)
+
     response_text = ask_groq(prompt)
     return {"response": response_text}
