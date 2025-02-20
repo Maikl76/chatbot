@@ -87,18 +87,18 @@ def get_documents():
     
     return jsonify({"documents": filtered_docs})
 
-# ✅ Funkce pro komunikaci s AI (dávkování dokumentů)
+# ✅ Funkce pro komunikaci s AI (pevná dávka 2000 tokenů)
 def ask_groq(question, documents):
-    """ Pošleme každý dokument zvlášť, aby nikdy nepřekročil limit. """
+    """ Pošleme dotaz po malých částech a spojíme odpovědi. """
     try:
         responses = []
 
         for i, doc in enumerate(documents):
             text = doc["Původní obsah"]
 
-            # ✅ Omezíme velikost každého textu na max. 3000 tokenů (pro jistotu)
+            # ✅ Rozdělení textu na 2000 tokenové části
             words = text.split()
-            chunk_size = 3000
+            chunk_size = 2000
             text_chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
 
             for j, chunk in enumerate(text_chunks):
@@ -109,7 +109,7 @@ def ask_groq(question, documents):
                     model="deepseek-r1-distill-qwen-32b",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.6,
-                    max_tokens=600,  # ✅ Zkrátíme odpovědi na max. 600 tokenů
+                    max_tokens=500,  # ✅ Každá odpověď max. 500 tokenů
                     top_p=0.95,
                     stream=False,
                     stop=None
@@ -117,8 +117,25 @@ def ask_groq(question, documents):
 
                 responses.append(completion.choices[0].message.content.strip())
 
-        # ✅ Spojíme odpovědi do jedné finální odpovědi
+        # ✅ Finální odpověď
         final_answer = "\n\n".join(responses)
+
+        # ✅ Shrnutí odpovědi, pokud je příliš dlouhá
+        if len(final_answer.split()) > 400:
+            summary_prompt = f"Shrň tuto odpověď do 100 slov:\n{final_answer}"
+
+            summary_completion = client.chat.completions.create(
+                model="deepseek-r1-distill-qwen-32b",
+                messages=[{"role": "user", "content": summary_prompt}],
+                temperature=0.6,
+                max_tokens=200,  # ✅ Odpověď max. 200 tokenů
+                top_p=0.95,
+                stream=False,
+                stop=None
+            )
+
+            return summary_completion.choices[0].message.content.strip()
+
         return final_answer
 
     except Exception as e:
