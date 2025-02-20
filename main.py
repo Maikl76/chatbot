@@ -1,140 +1,154 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from starlette.requests import Request
-import pdfplumber
-import docx
 import requests
 import os
-import sqlite3
+import pandas as pd
+import logging
+from flask import Flask, render_template, request, jsonify
+from bs4 import BeautifulSoup
+import fitz  # PyMuPDF
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, String, Text
-from sqlalchemy.orm import sessionmaker, declarative_base
+from groq import Groq
 
-# Načtení API klíče z .env souboru
+# ✅ Načtení API klíče
 load_dotenv()
-API_KEY = os.getenv("GROQ_API_KEY")
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Inicializace FastAPI
-app = FastAPI()
+# ✅ Inicializace klienta Groq
+client = Groq(api_key=GROQ_API_KEY)
 
-# Nastavení SQLite databáze
-DATABASE_URL = "sqlite:///./files.db"
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
-Base = declarative_base()
+app = Flask(__name__)
+app.secret_key = "supersecretkey"
 
-# Definice tabulky pro soubory
-class FileModel(Base):
-    __tablename__ = "files"
-    filename = Column(String, primary_key=True)
-    content = Column(Text, nullable=False)
+# ✅ Nastavení logování
+logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Vytvoření tabulky, pokud neexistuje
-Base.metadata.create_all(bind=engine)
+# ✅ Cesty pro soubory
+SOURCES_FILE = "sources.txt"
+HISTORY_DIR = "historie_pdfs"
 
-# Nastavení složky pro HTML šablony
-templates = Jinja2Templates(directory="templates")
+if not os.path.exists(HISTORY_DIR):
+    os.makedirs(HISTORY_DIR)
 
-# Servírování statických souborů (např. CSS, JS)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# ✅ Inicializace databáze
+columns = ["Název dokumentu", "Kategorie", "Datum vydání / aktualizace", "Odkaz na zdroj", "Shrnutí obsahu", "Soubor", "Klíčová slova", "Původní obsah"]
+legislativa_db = pd.DataFrame(columns=columns)
+document_status = {}
 
-# Hlavní stránka – zobrazí index.html
-@app.get("/", response_class=HTMLResponse)
-async def serve_home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+# ✅ Načteme seznam webových zdrojů
+def load_sources():
+    if os.path.exists(SOURCES_FILE):
+        with open(SOURCES_FILE, "r", encoding="utf-8") as file:
+            return [line.strip() for line in file.readlines()]
+    return []
 
-# Funkce pro extrakci textu z PDF
-def extract_text_from_pdf(file):
-    text = ""
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            extracted_text = page.extract_text()
-            if extracted_text:
-                text += extracted_text + "\n"
-    return text
-
-# Funkce pro extrakci textu z Word dokumentu
-def extract_text_from_docx(file):
-    doc = docx.Document(file)
-    text = "\n".join([para.text for para in doc.paragraphs])
-    return text
-
-# Funkce na zkrácení textu na max. 2000 slov (~2500 tokenů)
-def truncate_text(text, max_words=2000):
-    words = text.split()
-    if len(words) > max_words:
-        return " ".join(words[-max_words:])  # Posledních X slov
-    return text
-
-# Endpoint pro nahrání více souborů najednou
-@app.post("/upload/")
-async def upload_files(files: list[UploadFile] = File(...)):
-    session = SessionLocal()
-    uploaded_filenames = []
-
-    for file in files:
-        file_ext = file.filename.split(".")[-1]
-        text = ""
-
-        if file_ext == "pdf":
-            text = extract_text_from_pdf(file.file)
-        elif file_ext == "docx":
-            text = extract_text_from_docx(file.file)
-        else:
-            continue  # Nepodporovaný formát
-
-        # Uložit do databáze
-        file_entry = FileModel(filename=file.filename, content=text)
-        session.merge(file_entry)  # Pokud už existuje, aktualizuje ho
-        uploaded_filenames.append(file.filename)
-
-    session.commit()
-    session.close()
-    return {"message": "Soubory nahrány", "filenames": uploaded_filenames}
-
-# Funkce pro volání Groq API
-def ask_groq(prompt):
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    data = {
-        "model": "mixtral-8x7b-32768",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-
+# ✅ Stáhneme PDF dokument a extrahujeme text
+def extract_text_from_pdf(url):
     try:
-        response = requests.post(API_URL, headers=headers, json=data)
-        response_json = response.json()
-        if "choices" in response_json and len(response_json["choices"]) > 0:
-            return response_json["choices"][0]["message"]["content"]
-        elif "error" in response_json:
-            return f"❌ Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
-        else:
-            return "❌ Chyba: Neočekávaný formát odpovědi od API."
+        response = requests.get(url)
+        if response.status_code == 200:
+            pdf_document = fitz.open(stream=response.content, filetype="pdf")
+            return "\n".join([page.get_text("text") for page in pdf_document]).strip()
+    except Exception as e:
+        logging.error(f"Chyba při zpracování PDF: {e}")
+    return ""
 
-    except requests.exceptions.RequestException as e:
+# ✅ Stáhneme seznam legislativních dokumentů
+def scrape_legislation(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.text, 'html.parser')
+        data = []
+        for link in soup.find_all("a", href=True):
+            href = link["href"]
+            if href.endswith(".pdf"):
+                name = link.text.strip()
+                full_url = href if href.startswith("http") else url[:url.rfind("/")+1] + href
+                new_text = extract_text_from_pdf(full_url)
+                document_status[name] = "Nový ✅"
+                data.append([name, "Legislativa", "N/A", url, "", full_url, "předpisy", new_text])
+        return pd.DataFrame(data, columns=columns)
+    return pd.DataFrame(columns=columns)
+
+# ✅ Načteme legislativní dokumenty
+def load_initial_data():
+    global legislativa_db
+    urls = load_sources()
+    legislativa_db = pd.concat([scrape_legislation(url) for url in urls], ignore_index=True)
+
+load_initial_data()
+
+# ✅ Vrátí seznam dokumentů pro konkrétní webovou stránku
+@app.route('/get_documents', methods=['POST'])
+def get_documents():
+    selected_source = request.form.get("source", "").strip()
+    if not selected_source:
+        return jsonify({"error": "Vyberte webovou stránku."})
+
+    filtered_docs = [doc for doc in legislativa_db.to_dict(orient="records") if doc["Odkaz na zdroj"] == selected_source]
+    
+    return jsonify({"documents": filtered_docs})
+
+# ✅ Funkce pro komunikaci s AI (dávkování dokumentů)
+def ask_groq(question, documents):
+    """ Pošleme každý dokument zvlášť, aby nikdy nepřekročil limit. """
+    try:
+        responses = []
+
+        for i, doc in enumerate(documents):
+            text = doc["Původní obsah"]
+
+            # ✅ Omezíme velikost každého textu na max. 3000 tokenů (pro jistotu)
+            words = text.split()
+            chunk_size = 3000
+            text_chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
+
+            for j, chunk in enumerate(text_chunks):
+                truncated_text = " ".join(chunk)
+                prompt = f"Dokument {i+1}/{len(documents)}, část {j+1}/{len(text_chunks)}:\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
+
+                completion = client.chat.completions.create(
+                    model="deepseek-r1-distill-qwen-32b",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.6,
+                    max_tokens=600,  # ✅ Zkrátíme odpovědi na max. 600 tokenů
+                    top_p=0.95,
+                    stream=False,
+                    stop=None
+                )
+
+                responses.append(completion.choices[0].message.content.strip())
+
+        # ✅ Spojíme odpovědi do jedné finální odpovědi
+        final_answer = "\n\n".join(responses)
+        return final_answer
+
+    except Exception as e:
+        logging.error(f"⛔ Chyba při volání Groq API: {e}")
         return f"❌ Chyba při komunikaci s AI: {str(e)}"
 
-@app.post("/chat/")
-async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...)):
-    session = SessionLocal()
-    file_names_list = filenames.split(",")
-    context = ""
+# ✅ API endpoint pro AI dotaz (s výběrem webu)
+@app.route('/ask', methods=['POST'])
+def ask():
+    question = request.form.get("question", "").strip()
+    selected_source = request.form.get("source", "").strip()
 
-    for filename in file_names_list:
-        file_entry = session.query(FileModel).filter(FileModel.filename == filename.strip()).first()
-        if file_entry:
-            context += f"\n\n=== {filename} ===\n{file_entry.content}"
+    if not question:
+        return jsonify({"error": "Zadejte otázku!"})
+    if not selected_source:
+        return jsonify({"error": "Vyberte webovou stránku!"})
 
-    session.close()
+    # ✅ Najdeme dokumenty z vybrané webové stránky
+    selected_docs = [doc for doc in legislativa_db.to_dict(orient="records") if doc["Odkaz na zdroj"] == selected_source]
 
-    if not context:
-        return {"error": "❌ Žádné soubory nebyly nalezeny!"}
+    if not selected_docs:
+        return jsonify({"error": "Žádné dokumenty nenalezeny pro vybraný zdroj."})
 
-    # Zkrácení textu na 2000 slov (~2500 tokenů)
-    truncated_context = truncate_text(context)
+    answer = ask_groq(question, selected_docs)
+    return jsonify({"answer": answer})
 
-    prompt = f"Dokumenty:\n{truncated_context}\n\nOtázka: {user_input}\nOdpověď:"
-    response_text = ask_groq(prompt)
-    return {"response": response_text}
+# ✅ Hlavní webová stránka
+@app.route('/')
+def index():
+    return render_template('index.html', documents=legislativa_db.to_dict(orient="records"), sources=load_sources(), document_status=document_status)
+
+if __name__ == '__main__':
+    app.run(debug=True)
