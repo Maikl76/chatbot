@@ -1,14 +1,16 @@
-import requests
 import os
 import pandas as pd
 import logging
 import time
-import asyncio  # ✅ Pro paralelní odesílání požadavků
+import asyncio
 from flask import Flask, render_template, request, jsonify
 from bs4 import BeautifulSoup
 import fitz
 from dotenv import load_dotenv
 from groq import Groq
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.summarizers.lsa import LsaSummarizer
 
 # ✅ Načtení API klíče
 load_dotenv()
@@ -22,28 +24,32 @@ app.secret_key = "supersecretkey"
 
 logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
+def summarize_text(text, sentences=5):
+    """ Shrne dlouhý text do 5 klíčových vět """
+    parser = PlaintextParser.from_string(text, Tokenizer("english"))
+    summarizer = LsaSummarizer()
+    summary = summarizer(parser.document, sentences)
+    return " ".join([str(sentence) for sentence in summary])
+
 async def ask_groq(question, document):
-    """ Pošleme dotaz po malých částech, paralelně. """
+    """ Pošleme dotaz pouze s relevantními informacemi """
     text = document["Původní obsah"]
-    words = text.split()
-    chunk_size = 1000  # ✅ Každý požadavek max. 1000 tokenů
-    text_chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
+    
+    # ✅ Shrnutí textu před odesláním
+    summarized_text = summarize_text(text, sentences=3) 
 
-    async def send_request(chunk):
-        truncated_text = " ".join(chunk)
-        prompt = f"{truncated_text}\n{question}"
-        completion = client.chat.completions.create(
-            model="deepseek-r1-distill-qwen-32b",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.6,
-            max_tokens=300,  # ✅ Každá odpověď max. 300 tokenů
-            top_p=0.95,
-            stream=False
-        )
-        return completion.choices[0].message.content.strip()
-
-    responses = await asyncio.gather(*[send_request(chunk) for chunk in text_chunks])
-    return "\n\n".join(responses)
+    prompt = f"{summarized_text}\n\n{question}"
+    
+    completion = client.chat.completions.create(
+        model="deepseek-r1-distill-qwen-32b",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.6,
+        max_tokens=300,  # ✅ Každá odpověď max. 300 tokenů
+        top_p=0.95,
+        stream=False
+    )
+    
+    return completion.choices[0].message.content.strip()
 
 @app.route('/ask', methods=['POST'])
 async def ask():
