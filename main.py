@@ -22,28 +22,23 @@ app.secret_key = "supersecretkey"
 # ✅ Nastavení logování
 logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ✅ Funkce pro komunikaci s AI (PŘIDANÁ PAUZA)
+# ✅ Funkce pro komunikaci s AI (každý požadavek max. 1500 tokenů)
 def ask_groq(question, documents):
-    """ Pošleme dotaz po malých částech s pauzou mezi požadavky. """
+    """ Pošleme dotaz po malých částech max. 1500 tokenů a spojíme odpovědi. """
     try:
         responses = []
-        total_tokens_sent = 0  # ✅ Sledujeme celkové množství tokenů za minutu
 
         for i, doc in enumerate(documents):
             text = doc["Původní obsah"]
+
+            # ✅ Rozdělení textu na 1500 tokenové části
             words = text.split()
-            chunk_size = 2000  # ✅ Každý požadavek max. 2000 tokenů
+            chunk_size = 1500
             text_chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
 
             for j, chunk in enumerate(text_chunks):
                 truncated_text = " ".join(chunk)
                 prompt = f"Dokument {i+1}/{len(documents)}, část {j+1}/{len(text_chunks)}:\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
-
-                # ✅ Pokud bychom překročili limit 6000 tokenů za minutu, počkáme
-                if total_tokens_sent + 2000 > 6000:
-                    print("⏳ Čekám 60 sekund, abych nepřekročil limit API...")
-                    time.sleep(60)
-                    total_tokens_sent = 0  # ✅ Resetujeme počítadlo
 
                 completion = client.chat.completions.create(
                     model="deepseek-r1-distill-qwen-32b",
@@ -57,12 +52,8 @@ def ask_groq(question, documents):
 
                 responses.append(completion.choices[0].message.content.strip())
 
-                # ✅ Aktualizujeme počet tokenů odeslaných za minutu
-                total_tokens_sent += 2000 + 500
-                print(f"📊 Odesláno celkem tokenů: {total_tokens_sent}")
-
-                # ✅ PAUZA mezi požadavky (5 sekund)
-                time.sleep(5)
+                # ✅ PAUZA mezi požadavky (2 sekundy)
+                time.sleep(2)
 
         return "\n\n".join(responses)
 
