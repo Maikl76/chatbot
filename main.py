@@ -1,91 +1,140 @@
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.requests import Request
+import pdfplumber
+import docx
+import requests
 import os
-import pandas as pd
-import logging
-import time
-import asyncio
-import re  # ✅ Pro hledání klíčových slov v dokumentu
-from flask import Flask, render_template, request, jsonify
-from bs4 import BeautifulSoup
-import fitz
+import sqlite3
 from dotenv import load_dotenv
-from groq import Groq
+from sqlalchemy import create_engine, Column, String, Text
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-# ✅ Načtení API klíče
+# Načtení API klíče z .env souboru
 load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+API_KEY = os.getenv("GROQ_API_KEY")
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# ✅ Inicializace klienta Groq
-client = Groq(api_key=GROQ_API_KEY)
+# Inicializace FastAPI
+app = FastAPI()
 
-app = Flask(__name__)
-app.secret_key = "supersecretkey"
+# Nastavení SQLite databáze
+DATABASE_URL = "sqlite:///./files.db"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
 
-logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
+# Definice tabulky pro soubory
+class FileModel(Base):
+    __tablename__ = "files"
+    filename = Column(String, primary_key=True)
+    content = Column(Text, nullable=False)
 
-def extract_relevant_paragraphs(text, query, max_paragraphs=5):
-    """
-    Vyhledá odstavce obsahující klíčová slova dotazu.
-    Pokud žádné nenajde, vrátí první 2-3 nejdelší odstavce.
-    """
-    paragraphs = text.split("\n\n")  # Rozdělení na odstavce
-    keywords = query.lower().split()  # Rozdělení otázky na jednotlivá slova
+# Vytvoření tabulky, pokud neexistuje
+Base.metadata.create_all(bind=engine)
 
-    relevant_paragraphs = [
-        para for para in paragraphs if any(word in para.lower() for word in keywords)
-    ]
+# Nastavení složky pro HTML šablony
+templates = Jinja2Templates(directory="templates")
 
-    # Pokud žádný relevantní odstavec nenajdeme, vezmeme nejdelší odstavce
-    if not relevant_paragraphs:
-        relevant_paragraphs = sorted(paragraphs, key=len, reverse=True)[:max_paragraphs]
+# Servírování statických souborů (např. CSS, JS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-    return "\n\n".join(relevant_paragraphs[:max_paragraphs])  # Vrátíme maximálně `max_paragraphs` odstavců
+# Hlavní stránka – zobrazí index.html
+@app.get("/", response_class=HTMLResponse)
+async def serve_home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-async def ask_groq(question, document):
-    """ Pošleme dotaz s pouze relevantními odstavci. """
-    text = document["Původní obsah"]
-    
-    # ✅ Vyhledáme pouze relevantní odstavce
-    relevant_text = extract_relevant_paragraphs(text, question)
+# Funkce pro extrakci textu z PDF
+def extract_text_from_pdf(file):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            extracted_text = page.extract_text()
+            if extracted_text:
+                text += extracted_text + "\n"
+    return text
 
-    # ✅ Kontrola délky tokenů před odesláním
-    token_count = len(relevant_text.split()) + len(question.split())
-    print(f"📊 Odesíláme {token_count} tokenů")
-    
-    if token_count > 1500:
-        print("⚠️ Text je stále příliš dlouhý, redukujeme ho na 1000 tokenů!")
-        relevant_text = " ".join(relevant_text.split()[:1000])
+# Funkce pro extrakci textu z Word dokumentu
+def extract_text_from_docx(file):
+    doc = docx.Document(file)
+    text = "\n".join([para.text for para in doc.paragraphs])
+    return text
 
-    prompt = f"{relevant_text}\n\nOtázka: {question}\nOdpověď:"
+# Funkce na zkrácení textu na max. 1500 slov (~1900 tokenů)
+def truncate_text(text, max_words=1500):
+    words = text.split()
+    if len(words) > max_words:
+        return " ".join(words[-max_words:])  # Posledních X slov
+    return text
 
-    completion = client.chat.completions.create(
-        model="deepseek-r1-distill-qwen-32b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.6,
-        max_tokens=500,  # ✅ Každá odpověď max. 500 tokenů
-        top_p=0.95,
-        stream=False
-    )
+# Endpoint pro nahrání více souborů najednou
+@app.post("/upload/")
+async def upload_files(files: list[UploadFile] = File(...)):
+    session = SessionLocal()
+    uploaded_filenames = []
 
-    return completion.choices[0].message.content.strip()
+    for file in files:
+        file_ext = file.filename.split(".")[-1]
+        text = ""
 
-@app.route('/ask', methods=['POST'])
-async def ask():
-    question = request.form.get("question", "").strip()
-    selected_source = request.form.get("source", "").strip()
+        if file_ext == "pdf":
+            text = extract_text_from_pdf(file.file)
+        elif file_ext == "docx":
+            text = extract_text_from_docx(file.file)
+        else:
+            continue  # Nepodporovaný formát
 
-    if not question:
-        return jsonify({"error": "Zadejte otázku!"})
-    if not selected_source:
-        return jsonify({"error": "Vyberte webovou stránku!"})
+        # Uložit do databáze
+        file_entry = FileModel(filename=file.filename, content=text)
+        session.merge(file_entry)  # Pokud už existuje, aktualizuje ho
+        uploaded_filenames.append(file.filename)
 
-    selected_docs = [doc for doc in legislativa_db.to_dict(orient="records") if doc["Odkaz na zdroj"] == selected_source]
+    session.commit()
+    session.close()
+    return {"message": "Soubory nahrány", "filenames": uploaded_filenames}
 
-    if not selected_docs:
-        return jsonify({"error": "Žádné dokumenty nenalezeny pro vybraný zdroj."})
+# Funkce pro volání Groq API
+def ask_groq(prompt):
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    data = {
+        "model": "mixtral-8x7b-32768",
+        "messages": [{"role": "user", "content": prompt}]
+    }
 
-    tasks = [ask_groq(question, doc) for doc in selected_docs]
-    answers = await asyncio.gather(*tasks)
-    return jsonify({"answer": "\n\n".join(answers)})
+    try:
+        response = requests.post(API_URL, headers=headers, json=data)
+        response_json = response.json()
+        if "choices" in response_json and len(response_json["choices"]) > 0:
+            return response_json["choices"][0]["message"]["content"]
+        elif "error" in response_json:
+            return f"❌ Chyba API: {response_json['error'].get('message', 'Neznámá chyba')}"
+        else:
+            return "❌ Chyba: Neočekávaný formát odpovědi od API."
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    except requests.exceptions.RequestException as e:
+        return f"❌ Chyba při komunikaci s AI: {str(e)}"
+
+@app.post("/chat/")
+async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...)):
+    session = SessionLocal()
+    file_names_list = filenames.split(",")
+    context = ""
+
+    for filename in file_names_list:
+        file_entry = session.query(FileModel).filter(FileModel.filename == filename.strip()).first()
+        if file_entry:
+            context += f"\n\n=== {filename} ===\n{file_entry.content}"
+
+    session.close()
+
+    if not context:
+        return {"error": "❌ Žádné soubory nebyly nalezeny!"}
+
+    # Zkrácení textu na 1500 slov (~1900 tokenů)
+    truncated_context = truncate_text(context)
+
+    prompt = f"Dokumenty:\n{truncated_context}\n\nOtázka: {user_input}\nOdpověď:"
+    response_text = ask_groq(prompt)
+    return {"response": response_text}
