@@ -2,10 +2,10 @@ import requests
 import os
 import pandas as pd
 import logging
-import time  # ✅ Přidáváme pauzu mezi požadavky
+import time  
 from flask import Flask, render_template, request, jsonify
 from bs4 import BeautifulSoup
-import fitz  # PyMuPDF
+import fitz  
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -22,9 +22,29 @@ app.secret_key = "supersecretkey"
 # ✅ Nastavení logování
 logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
+# ✅ Globální proměnná pro sledování tokenů
+last_request_time = time.time()
+total_tokens_sent = 0
+TOKEN_LIMIT_PER_MINUTE = 6000
+TOKEN_BUFFER = 500  # Rezerva pro jistotu
+
+# ✅ Funkce pro sledování a čekání
+def check_rate_limit():
+    global total_tokens_sent, last_request_time
+
+    elapsed_time = time.time() - last_request_time
+    if elapsed_time < 60 and total_tokens_sent > (TOKEN_LIMIT_PER_MINUTE - TOKEN_BUFFER):
+        wait_time = 60 - elapsed_time
+        print(f"⏳ Překročen limit! Čekám {wait_time:.2f} sekund...")
+        time.sleep(wait_time)
+        total_tokens_sent = 0  # Resetujeme po 60 sekundách
+    last_request_time = time.time()
+
 # ✅ Funkce pro komunikaci s AI (každý požadavek max. 1500 tokenů)
 def ask_groq(question, documents):
     """ Pošleme dotaz po malých částech max. 1500 tokenů a spojíme odpovědi. """
+    global total_tokens_sent
+
     try:
         responses = []
 
@@ -40,6 +60,8 @@ def ask_groq(question, documents):
                 truncated_text = " ".join(chunk)
                 prompt = f"Dokument {i+1}/{len(documents)}, část {j+1}/{len(text_chunks)}:\n{truncated_text}\n\nOtázka: {question}\nOdpověď:"
 
+                check_rate_limit()  # ✅ Ověření před odesláním požadavku
+
                 completion = client.chat.completions.create(
                     model="deepseek-r1-distill-qwen-32b",
                     messages=[{"role": "user", "content": prompt}],
@@ -52,7 +74,11 @@ def ask_groq(question, documents):
 
                 responses.append(completion.choices[0].message.content.strip())
 
-                # ✅ PAUZA mezi požadavky (2 sekundy)
+                # ✅ Aktualizace počtu tokenů
+                total_tokens_sent += len(truncated_text.split()) + 500
+                print(f"📊 Celkem tokenů: {total_tokens_sent}")
+
+                # ✅ Pauza mezi požadavky (2 sekundy)
                 time.sleep(2)
 
         return "\n\n".join(responses)
@@ -61,7 +87,7 @@ def ask_groq(question, documents):
         logging.error(f"⛔ Chyba při volání Groq API: {e}")
         return f"❌ Chyba při komunikaci s AI: {str(e)}"
 
-# ✅ API endpoint pro AI dotaz (s výběrem webu)
+# ✅ API endpoint pro AI dotaz
 @app.route('/ask', methods=['POST'])
 def ask():
     question = request.form.get("question", "").strip()
