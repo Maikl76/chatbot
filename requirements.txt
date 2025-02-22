@@ -8,3 +8,4 @@ python-dotenv
 jinja2
 sqlite-utils
 sqlalchemy
+beautifulsoup4
