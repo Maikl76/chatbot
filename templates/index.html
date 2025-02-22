@@ -10,38 +10,11 @@
             font-family: Arial, sans-serif;
             background-color: #f4f4f4;
             text-align: center;
-            margin: 0;
-            padding: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
-        }
-        h2 {
-            color: #333;
-        }
-        #fileInput, #userInput {
-            padding: 10px;
-            margin: 10px 0;
-            width: 80%;
-            max-width: 500px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            font-size: 16px;
-        }
-        button {
-            padding: 10px 20px;
-            margin: 10px;
-            border: none;
-            background-color: #007BFF;
-            color: white;
-            font-size: 16px;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #0056b3;
         }
         #chat-container {
             width: 90%;
@@ -51,21 +24,48 @@
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         }
-        #response {
-            margin-top: 20px;
-            padding: 15px;
-            background: #e9ecef;
-            border-radius: 5px;
+        #fileInput {
+            display: block;
+            margin: 10px auto;
+        }
+        #userInput {
+            width: 80%;
+            padding: 10px;
+            margin: 10px 0;
             font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #response {
+            margin-top: 15px;
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #uploadedFiles {
+            font-size: 14px;
+            color: #333;
+            margin-top: 10px;
         }
     </style>
 </head>
 <body>
 
     <div id="chat-container">
-        <h2>Nahraj dokument</h2>
-        <input type="file" id="fileInput">
-        <button onclick="uploadFile()">Nahrát</button>
+        <h2>Nahraj dokumenty</h2>
+        <input type="file" id="fileInput" multiple>
+        <button onclick="uploadFiles()">Nahrát</button>
+
+        <p id="uploadedFiles"></p>
 
         <h2>Chat</h2>
         <input type="text" id="userInput" placeholder="Zadej otázku...">
@@ -76,36 +76,43 @@
 
     <script>
         let apiUrl = "https://chatbot-ybmh.onrender.com"; 
-        let uploadedFileName = "";
+        let uploadedFiles = [];
 
-        async function uploadFile() {
-            let fileInput = document.getElementById("fileInput").files[0];
-            if (!fileInput) {
-                alert("Vyber soubor k nahrání.");
+        async function uploadFiles() {
+            let fileInput = document.getElementById("fileInput").files;
+            if (fileInput.length === 0) {
+                alert("Vyber alespoň jeden soubor.");
                 return;
             }
 
             let formData = new FormData();
-            formData.append("file", fileInput);
+            for (let file of fileInput) {
+                formData.append("files", file);
+            }
 
-            let response = await fetch(`${apiUrl}/upload/`, {
-                method: "POST",
-                body: formData
-            });
+            try {
+                let response = await fetch(`${apiUrl}/upload/`, {
+                    method: "POST",
+                    body: formData
+                });
 
-            let result = await response.json();
-            if (result.filename) {
-                uploadedFileName = result.filename;
-                alert("Soubor nahrán!");
-            } else {
-                alert("Chyba při nahrávání: " + (result.error || "Neznámá chyba."));
+                let result = await response.json();
+                if (result.filenames) {
+                    uploadedFiles = result.filenames;
+                    document.getElementById("uploadedFiles").innerText = "Nahráno: " + uploadedFiles.join(", ");
+                    alert("Soubory nahrány!");
+                } else {
+                    alert("Chyba při nahrávání: " + (result.error || "Neznámá chyba."));
+                }
+            } catch (error) {
+                alert("Chyba při komunikaci se serverem.");
             }
         }
 
         async function sendMessage() {
             let userInput = document.getElementById("userInput").value;
-            if (!uploadedFileName) {
-                alert("Nejdříve nahraj soubor.");
+            if (uploadedFiles.length === 0) {
+                alert("Nejdříve nahraj soubory.");
                 return;
             }
             if (!userInput.trim()) {
@@ -114,14 +121,10 @@
             }
 
             let formData = new FormData();
-            formData.append("filename", uploadedFileName);
+            formData.append("filenames", uploadedFiles.join(","));
             formData.append("user_input", userInput);
 
-            let response = await fetch(`${apiUrl}/chat/`, {
-                method: "POST",
-                body: formData
-            });
-
+            let response = await fetch(`${apiUrl}/chat/`, { method: "POST", body: formData });
             let result = await response.json();
             document.getElementById("response").innerText = result.response || "Chyba při zpracování.";
         }
