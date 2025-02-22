@@ -9,26 +9,49 @@
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f4f4;
-            text-align: center;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
+            margin: 0;
         }
-        #chat-container {
+        #container {
+            display: flex;
             width: 90%;
-            max-width: 600px;
+            max-width: 1200px;
             background: white;
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         }
+        #left, #right {
+            flex: 1;
+            padding: 20px;
+        }
+        #left {
+            border-right: 1px solid #ddd;
+        }
+        #documentList {
+            text-align: left;
+        }
+        #documentList a {
+            display: block;
+            margin: 5px 0;
+            color: #007BFF;
+            text-decoration: none;
+        }
+        #documentList a:hover {
+            text-decoration: underline;
+        }
+        #chat-container {
+            text-align: center;
+        }
         #fileInput {
             display: block;
             margin: 10px auto;
         }
-        #userInput {
+        #userInput, #searchInput {
             width: 80%;
             padding: 10px;
             margin: 10px 0;
@@ -45,33 +68,60 @@
         button:hover {
             background-color: #0056b3;
         }
-        #response {
+        #response, #searchResults {
             margin-top: 15px;
             background: #e9ecef;
             padding: 10px;
             border-radius: 5px;
+            text-align: left;
         }
-        #uploadedFiles {
-            font-size: 14px;
-            color: #333;
-            margin-top: 10px;
+        .result-paragraph {
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 10px;
         }
     </style>
 </head>
 <body>
 
-    <div id="chat-container">
-        <h2>Nahraj dokumenty</h2>
-        <input type="file" id="fileInput" multiple>
-        <button onclick="uploadFiles()">Nahrát</button>
+    <div id="container">
+        <!-- Levá strana: Seznam dokumentů -->
+        <div id="left">
+            <h3>Vyberte webovou stránku:</h3>
+            <select id="webpageSelect">
+                {% for page in webpages %}
+                    <option value="{{ page }}">{{ page }}</option>
+                {% endfor %}
+            </select>
+            <button onclick="loadDocuments()">Načíst dokumenty</button>
 
-        <p id="uploadedFiles"></p>
+            <h3>Přidat novou stránku:</h3>
+            <input type="text" id="newWebpageUrl" placeholder="Vložte URL">
+            <button onclick="addWebpage()">Přidat</button>
 
-        <h2>Chat</h2>
-        <input type="text" id="userInput" placeholder="Zadej otázku...">
-        <button onclick="sendMessage()">Odeslat</button>
+            <h3>Seznam dokumentů:</h3>
+            <div id="documentList"></div>
+        </div>
 
-        <p id="response"></p>
+        <!-- Pravá strana: AI chat a vyhledávání -->
+        <div id="right">
+            <div id="chat-container">
+                <h2>Nahraj dokumenty</h2>
+                <input type="file" id="fileInput" multiple>
+                <button onclick="uploadFiles()">Nahrát</button>
+                <p id="uploadedFiles"></p>
+
+                <h2>Chat</h2>
+                <input type="text" id="userInput" placeholder="Zadej otázku...">
+                <button onclick="sendMessage()">Odeslat</button>
+                <p id="response"></p>
+            </div>
+
+            <h2>Vyhledávání</h2>
+            <input type="text" id="searchInput" placeholder="Zadejte klíčové slovo">
+            <button onclick="searchKeyword()">Hledat</button>
+            <div id="searchResults"></div>
+        </div>
     </div>
 
     <script>
@@ -128,6 +178,61 @@
             let result = await response.json();
             document.getElementById("response").innerText = result.response || "Chyba při zpracování.";
         }
+
+        async function searchKeyword() {
+            let keyword = document.getElementById("searchInput").value.trim();
+            if (!keyword) {
+                alert("Zadejte klíčové slovo pro vyhledávání.");
+                return;
+            }
+
+            let formData = new FormData();
+            formData.append("keyword", keyword);
+
+            let response = await fetch(`${apiUrl}/search/`, { method: "POST", body: formData });
+            let result = await response.json();
+            let searchResults = document.getElementById("searchResults");
+            searchResults.innerHTML = "";
+
+            if (result.results) {
+                result.results.forEach(paragraph => {
+                    let div = document.createElement("div");
+                    div.className = "result-paragraph";
+                    div.innerText = paragraph;
+                    searchResults.appendChild(div);
+                });
+            } else {
+                searchResults.innerHTML = "<p>Žádné výsledky nenalezeny.</p>";
+            }
+        }
+
+        async function loadDocuments() {
+            let url = document.getElementById("webpageSelect").value;
+            let response = await fetch(`${apiUrl}/scrape/?url=${encodeURIComponent(url)}`);
+            let result = await response.json();
+            let documentList = document.getElementById("documentList");
+            documentList.innerHTML = "";
+
+            result.forEach(link => {
+                let a = document.createElement("a");
+                a.href = link;
+                a.target = "_blank";
+                a.innerText = link;
+                documentList.appendChild(a);
+            });
+        }
+
+        async function addWebpage() {
+            let url = document.getElementById("newWebpageUrl").value.trim();
+            if (!url) return;
+
+            await fetch(`${apiUrl}/add_webpage/`, {
+                method: "POST",
+                body: new URLSearchParams({ url })
+            });
+            alert("Stránka přidána! Obnovte stránku.");
+        }
     </script>
+
 </body>
 </html>
