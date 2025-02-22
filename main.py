@@ -11,6 +11,7 @@ import sqlite3
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, String, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
+from bs4 import BeautifulSoup
 
 # Načtení API klíče z .env souboru
 load_dotenv()
@@ -32,7 +33,12 @@ class FileModel(Base):
     filename = Column(String, primary_key=True)
     content = Column(Text, nullable=False)
 
-# Vytvoření tabulky, pokud neexistuje
+# Definice tabulky pro webové stránky
+class WebPage(Base):
+    __tablename__ = "webpages"
+    url = Column(String, primary_key=True)
+
+# Vytvoření tabulek, pokud neexistují
 Base.metadata.create_all(bind=engine)
 
 # Nastavení složky pro HTML šablony
@@ -44,7 +50,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Hlavní stránka – zobrazí index.html
 @app.get("/", response_class=HTMLResponse)
 async def serve_home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    session = SessionLocal()
+    webpages = session.query(WebPage.url).all()
+    session.close()
+    
+    return templates.TemplateResponse("index.html", {"request": request, "webpages": [url[0] for url in webpages]})
 
 # Funkce pro extrakci textu z PDF
 def extract_text_from_pdf(file):
@@ -62,12 +72,24 @@ def extract_text_from_docx(file):
     text = "\n".join([para.text for para in doc.paragraphs])
     return text
 
-# Funkce na zkrácení textu na max. 1500 slov (~1900 tokenů)
-def truncate_text(text, max_words=1500):
-    words = text.split()
-    if len(words) > max_words:
-        return " ".join(words[-max_words:])  # Posledních X slov
-    return text
+# Funkce pro skenování webových stránek
+def scrape_webpage(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.text, 'html.parser')
+        links = [a["href"] for a in soup.find_all("a", href=True) if a["href"].endswith(".pdf") or a["href"].endswith(".docx")]
+        return links
+    return []
+
+# Přidání nové webové stránky do seznamu
+@app.post("/add_webpage/")
+async def add_webpage(url: str = Form(...)):
+    session = SessionLocal()
+    webpage = WebPage(url=url)
+    session.merge(webpage)
+    session.commit()
+    session.close()
+    return {"message": "Stránka přidána", "url": url}
 
 # Endpoint pro nahrání více souborů najednou
 @app.post("/upload/")
@@ -133,8 +155,30 @@ async def chat_with_files(filenames: str = Form(...), user_input: str = Form(...
         return {"error": "❌ Žádné soubory nebyly nalezeny!"}
 
     # Zkrácení textu na 1500 slov (~1900 tokenů)
-    truncated_context = truncate_text(context)
+    truncated_context = " ".join(context.split()[-1500:])
 
     prompt = f"Dokumenty:\n{truncated_context}\n\nOtázka: {user_input}\nOdpověď:"
     response_text = ask_groq(prompt)
     return {"response": response_text}
+
+# Vyhledávání klíčového slova v dokumentech
+@app.post("/search/")
+async def search_documents(keyword: str = Form(...)):
+    session = SessionLocal()
+    results = []
+    seen_paragraphs = set()
+
+    files = session.query(FileModel).all()
+    for file in files:
+        paragraphs = file.content.split("\n\n")  # Rozdělení textu na odstavce
+        for paragraph in paragraphs:
+            if keyword.lower() in paragraph.lower() and paragraph not in seen_paragraphs:
+                results.append(paragraph.strip())
+                seen_paragraphs.add(paragraph)
+
+    session.close()
+
+    if not results:
+        return {"message": "❌ Žádné výsledky nenalezeny."}
+
+    return {"results": results}
