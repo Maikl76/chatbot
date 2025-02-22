@@ -5,36 +5,88 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chatbot s dokumenty</title>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        h2 {
+            color: #333;
+        }
+        #fileInput, #userInput {
+            padding: 10px;
+            margin: 10px 0;
+            width: 80%;
+            max-width: 500px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            border: none;
+            background-color: #007BFF;
+            color: white;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #chat-container {
+            width: 90%;
+            max-width: 600px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #response {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+    </style>
 </head>
 <body>
-    <h2>Nahraj dokumenty</h2>
-    <input type="file" id="fileInput" multiple>
-    <button onclick="uploadFiles()">Nahrát</button>
 
-    <h2>Chat</h2>
-    <input type="text" id="userInput" placeholder="Zadej otázku...">
-    <button onclick="sendMessage()">Odeslat</button>
+    <div id="chat-container">
+        <h2>Nahraj dokument</h2>
+        <input type="file" id="fileInput">
+        <button onclick="uploadFile()">Nahrát</button>
 
-    <h3>Nahrané soubory:</h3>
-    <ul id="fileList"></ul>
+        <h2>Chat</h2>
+        <input type="text" id="userInput" placeholder="Zadej otázku...">
+        <button onclick="sendMessage()">Odeslat</button>
 
-    <p id="response"></p>
+        <p id="response"></p>
+    </div>
 
     <script>
-        let apiUrl = "https://chatbot-ybmh.onrender.com"; // Backend na Renderu
-        let uploadedFileNames = "";
+        let apiUrl = "https://chatbot-ybmh.onrender.com"; 
+        let uploadedFileName = "";
 
-        async function uploadFiles() {
-            let fileInput = document.getElementById("fileInput").files;
-            if (fileInput.length === 0) {
-                alert("Vyber soubory k nahrání.");
+        async function uploadFile() {
+            let fileInput = document.getElementById("fileInput").files[0];
+            if (!fileInput) {
+                alert("Vyber soubor k nahrání.");
                 return;
             }
 
             let formData = new FormData();
-            for (let i = 0; i < fileInput.length; i++) {
-                formData.append("files", fileInput[i]);
-            }
+            formData.append("file", fileInput);
 
             let response = await fetch(`${apiUrl}/upload/`, {
                 method: "POST",
@@ -42,32 +94,27 @@
             });
 
             let result = await response.json();
-            if (result.filenames) {
-                uploadedFileNames = result.filenames.join(",");
-                alert("Soubory nahrány!");
-
-                // Aktualizace seznamu nahraných souborů
-                let fileList = document.getElementById("fileList");
-                fileList.innerHTML = "";
-                result.filenames.forEach(filename => {
-                    let li = document.createElement("li");
-                    li.textContent = filename;
-                    fileList.appendChild(li);
-                });
+            if (result.filename) {
+                uploadedFileName = result.filename;
+                alert("Soubor nahrán!");
             } else {
-                alert("Chyba při nahrávání.");
+                alert("Chyba při nahrávání: " + (result.error || "Neznámá chyba."));
             }
         }
 
         async function sendMessage() {
             let userInput = document.getElementById("userInput").value;
-            if (!uploadedFileNames) {
-                alert("Nejdříve nahraj soubory.");
+            if (!uploadedFileName) {
+                alert("Nejdříve nahraj soubor.");
+                return;
+            }
+            if (!userInput.trim()) {
+                alert("Zadej otázku.");
                 return;
             }
 
             let formData = new FormData();
-            formData.append("filenames", uploadedFileNames);
+            formData.append("filename", uploadedFileName);
             formData.append("user_input", userInput);
 
             let response = await fetch(`${apiUrl}/chat/`, {
