@@ -16,15 +16,7 @@
             <button onclick="addWebpage()">Přidat</button>
 
             <h3>Sledované webové stránky:</h3>
-            <ul id="webpageList">
-                {% for page in webpages %}
-                    <li>
-                        <strong>{{ page }}</strong>
-                        <button onclick="loadDocuments('{{ page }}')">Načíst dokumenty</button>
-                        <ul id="documents-{{ page|replace('/', '') }}"></ul>
-                    </li>
-                {% endfor %}
-            </ul>
+            <ul id="webpageList"></ul>
         </div>
 
         <!-- Pravá strana: AI chat a vyhledávání -->
@@ -51,30 +43,48 @@
     <script>
         let apiUrl = "http://127.0.0.1:8000"; 
 
+        // Načte existující stránky při načtení stránky
+        async function loadWebpages() {
+            let response = await fetch(`${apiUrl}/webpages/`);
+            let webpages = await response.json();
+            let webpageList = document.getElementById("webpageList");
+            webpageList.innerHTML = "";
+
+            webpages.forEach(url => {
+                let li = document.createElement("li");
+                li.innerHTML = `<strong>${url}</strong> 
+                                <button onclick="loadDocuments('${url}')">Načíst dokumenty</button>
+                                <ul id="documents-${url.replace(/\W/g, '')}"></ul>`;
+                webpageList.appendChild(li);
+            });
+        }
+
         async function addWebpage() {
             let url = document.getElementById("newWebpageUrl").value.trim();
-            if (!url) return;
+            if (!url) {
+                alert("Zadejte platnou URL.");
+                return;
+            }
 
             let response = await fetch(`${apiUrl}/add_webpage/`, {
                 method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: new URLSearchParams({ url })
             });
 
             let result = await response.json();
             if (result.message === "Stránka přidána") {
-                let webpageList = document.getElementById("webpageList");
-                let li = document.createElement("li");
-                li.innerHTML = `<strong>${url}</strong> 
-                                <button onclick="loadDocuments('${url}')">Načíst dokumenty</button>
-                                <ul id="documents-${url.replace(/\//g, '')}"></ul>`;
-                webpageList.appendChild(li);
+                document.getElementById("newWebpageUrl").value = ""; // Vyčistit pole
+                loadWebpages(); // Znovu načíst seznam
+            } else {
+                alert("Chyba při přidávání stránky.");
             }
         }
 
         async function loadDocuments(url) {
             let response = await fetch(`${apiUrl}/scrape/?url=${encodeURIComponent(url)}`);
             let result = await response.json();
-            let docList = document.getElementById(`documents-${url.replace(/\//g, '')}`);
+            let docList = document.getElementById(`documents-${url.replace(/\W/g, '')}`);
             docList.innerHTML = "";
 
             result.forEach(link => {
@@ -87,6 +97,9 @@
                 docList.appendChild(li);
             });
         }
+
+        // Načte seznam webových stránek při spuštění
+        loadWebpages();
     </script>
 
 </body>
