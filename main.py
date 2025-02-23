@@ -44,24 +44,25 @@ def scrape_webpage_links(url):
         return full_links
     return []
 
-# ✅ Hlavní stránka – zobrazí index.html se seznamem webových stránek
+# ✅ Hlavní stránka
 @app.get("/", response_class=HTMLResponse)
 async def serve_home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+# ✅ API pro získání seznamu webových stránek
+@app.get("/webpages/")
+async def get_webpages():
     session = SessionLocal()
     webpages = session.query(WebPage.url).all()
     session.close()
+    return [url[0] for url in webpages]
 
-    return templates.TemplateResponse("index.html", {
-        "request": request, 
-        "webpages": [url[0] for url in webpages]
-    })
-
-# ✅ Přidání nové webové stránky do seznamu
+# ✅ Přidání nové webové stránky
 @app.post("/add_webpage/")
 async def add_webpage(url: str = Form(...)):
     session = SessionLocal()
     webpage = WebPage(url=url)
-    session.merge(webpage)
+    session.merge(webpage)  # Pokud URL existuje, aktualizuje ji, jinak přidá novou
     session.commit()
     session.close()
     return {"message": "Stránka přidána", "url": url}
@@ -70,3 +71,8 @@ async def add_webpage(url: str = Form(...)):
 @app.get("/scrape/")
 async def scrape(url: str):
     return scrape_webpage_links(url)
+
+# ✅ Spuštění aplikace
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
