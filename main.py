@@ -1,18 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 import requests
-import os
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, String, Text
+from sqlalchemy import create_engine, Column, String
 from sqlalchemy.orm import sessionmaker, declarative_base
 from bs4 import BeautifulSoup
-
-# Načtení API klíče z .env souboru
-load_dotenv()
-API_KEY = os.getenv("GROQ_API_KEY")
 
 # Inicializace FastAPI
 app = FastAPI()
@@ -50,22 +44,16 @@ def scrape_webpage_links(url):
         return full_links
     return []
 
-# ✅ Hlavní stránka – zobrazí index.html se seznamem webových stránek a PDF/DOCX odkazy
+# ✅ Hlavní stránka – zobrazí index.html se seznamem webových stránek
 @app.get("/", response_class=HTMLResponse)
 async def serve_home(request: Request):
     session = SessionLocal()
     webpages = session.query(WebPage.url).all()
     session.close()
 
-    # Skenování odkazů z uložených webových stránek
-    all_links = {}
-    for url in webpages:
-        all_links[url[0]] = scrape_webpage_links(url[0])
-
     return templates.TemplateResponse("index.html", {
         "request": request, 
-        "webpages": [url[0] for url in webpages], 
-        "links": all_links  # Odkazy ke každé stránce
+        "webpages": [url[0] for url in webpages]
     })
 
 # ✅ Přidání nové webové stránky do seznamu
@@ -77,3 +65,8 @@ async def add_webpage(url: str = Form(...)):
     session.commit()
     session.close()
     return {"message": "Stránka přidána", "url": url}
+
+# ✅ Načtení dokumentů ze sledovaných webových stránek
+@app.get("/scrape/")
+async def scrape(url: str):
+    return scrape_webpage_links(url)
