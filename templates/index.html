@@ -34,6 +34,8 @@
         }
         #documentList {
             text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
         }
         #documentList a {
             display: block;
@@ -85,22 +87,30 @@
 <body>
 
     <div id="container">
-        <!-- Levá strana: Seznam dokumentů -->
+        <!-- Levá strana: Seznam webových stránek a dokumentů -->
         <div id="left">
             <h3>Vyberte webovou stránku:</h3>
-            <select id="webpageSelect">
+            <select id="webpageSelect" onchange="loadDocuments()">
                 {% for page in webpages %}
                     <option value="{{ page }}">{{ page }}</option>
                 {% endfor %}
             </select>
-            <button onclick="loadDocuments()">Načíst dokumenty</button>
 
             <h3>Přidat novou stránku:</h3>
             <input type="text" id="newWebpageUrl" placeholder="Vložte URL">
             <button onclick="addWebpage()">Přidat</button>
 
             <h3>Seznam dokumentů:</h3>
-            <div id="documentList"></div>
+            <div id="documentList">
+                {% for page, links in links.items() %}
+                    <h4>{{ page }}</h4>
+                    <ul>
+                        {% for link in links %}
+                            <li><a href="{{ link }}" target="_blank">{{ link }}</a></li>
+                        {% endfor %}
+                    </ul>
+                {% endfor %}
+            </div>
         </div>
 
         <!-- Pravá strana: AI chat a vyhledávání -->
@@ -125,114 +135,9 @@
     </div>
 
     <script>
-        let apiUrl = "https://chatbot-ybmh.onrender.com"; 
+        let apiUrl = "http://127.0.0.1:8000"; // Lokální API
         let uploadedFiles = [];
 
         async function uploadFiles() {
             let fileInput = document.getElementById("fileInput").files;
-            if (fileInput.length === 0) {
-                alert("Vyber alespoň jeden soubor.");
-                return;
-            }
-
-            let formData = new FormData();
-            for (let file of fileInput) {
-                formData.append("files", file);
-            }
-
-            try {
-                let response = await fetch(`${apiUrl}/upload/`, {
-                    method: "POST",
-                    body: formData
-                });
-
-                let result = await response.json();
-                if (result.filenames) {
-                    uploadedFiles = result.filenames;
-                    document.getElementById("uploadedFiles").innerText = "Nahráno: " + uploadedFiles.join(", ");
-                    alert("Soubory nahrány!");
-                } else {
-                    alert("Chyba při nahrávání: " + (result.error || "Neznámá chyba."));
-                }
-            } catch (error) {
-                alert("Chyba při komunikaci se serverem.");
-            }
-        }
-
-        async function sendMessage() {
-            let userInput = document.getElementById("userInput").value;
-            if (uploadedFiles.length === 0) {
-                alert("Nejdříve nahraj soubory.");
-                return;
-            }
-            if (!userInput.trim()) {
-                alert("Zadej otázku.");
-                return;
-            }
-
-            let formData = new FormData();
-            formData.append("filenames", uploadedFiles.join(","));
-            formData.append("user_input", userInput);
-
-            let response = await fetch(`${apiUrl}/chat/`, { method: "POST", body: formData });
-            let result = await response.json();
-            document.getElementById("response").innerText = result.response || "Chyba při zpracování.";
-        }
-
-        async function searchKeyword() {
-            let keyword = document.getElementById("searchInput").value.trim();
-            if (!keyword) {
-                alert("Zadejte klíčové slovo pro vyhledávání.");
-                return;
-            }
-
-            let formData = new FormData();
-            formData.append("keyword", keyword);
-
-            let response = await fetch(`${apiUrl}/search/`, { method: "POST", body: formData });
-            let result = await response.json();
-            let searchResults = document.getElementById("searchResults");
-            searchResults.innerHTML = "";
-
-            if (result.results) {
-                result.results.forEach(paragraph => {
-                    let div = document.createElement("div");
-                    div.className = "result-paragraph";
-                    div.innerText = paragraph;
-                    searchResults.appendChild(div);
-                });
-            } else {
-                searchResults.innerHTML = "<p>Žádné výsledky nenalezeny.</p>";
-            }
-        }
-
-        async function loadDocuments() {
-            let url = document.getElementById("webpageSelect").value;
-            let response = await fetch(`${apiUrl}/scrape/?url=${encodeURIComponent(url)}`);
-            let result = await response.json();
-            let documentList = document.getElementById("documentList");
-            documentList.innerHTML = "";
-
-            result.forEach(link => {
-                let a = document.createElement("a");
-                a.href = link;
-                a.target = "_blank";
-                a.innerText = link;
-                documentList.appendChild(a);
-            });
-        }
-
-        async function addWebpage() {
-            let url = document.getElementById("newWebpageUrl").value.trim();
-            if (!url) return;
-
-            await fetch(`${apiUrl}/add_webpage/`, {
-                method: "POST",
-                body: new URLSearchParams({ url })
-            });
-            alert("Stránka přidána! Obnovte stránku.");
-        }
-    </script>
-
-</body>
-</html>
+            if (fileI
