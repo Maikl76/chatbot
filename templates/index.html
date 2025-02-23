@@ -5,58 +5,141 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chatbot s dokumenty</title>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        #container {
+            width: 90%;
+            max-width: 800px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #fileInput {
+            display: block;
+            margin: 10px auto;
+        }
+        #userInput {
+            width: 80%;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #response, #uploadedFiles, #documentList {
+            margin-top: 15px;
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: left;
+        }
+        #webpageList {
+            list-style-type: none;
+            padding: 0;
+        }
+        #webpageList li {
+            margin: 5px 0;
+        }
+    </style>
 </head>
 <body>
 
     <div id="container">
-        <!-- Levá strana: Seznam webových stránek a dokumentů -->
-        <div id="left">
-            <h3>Přidat novou stránku:</h3>
-            <input type="text" id="newWebpageUrl" placeholder="Vložte URL">
-            <button onclick="addWebpage()">Přidat</button>
+        <h2>Nahraj dokumenty</h2>
+        <input type="file" id="fileInput" multiple>
+        <button onclick="uploadFiles()">Nahrát</button>
 
-            <h3>Sledované webové stránky:</h3>
-            <ul id="webpageList"></ul>
-        </div>
+        <p id="uploadedFiles"></p>
 
-        <!-- Pravá strana: AI chat a vyhledávání -->
-        <div id="right">
-            <div id="chat-container">
-                <h2>Nahraj dokumenty</h2>
-                <input type="file" id="fileInput" multiple>
-                <button onclick="uploadFiles()">Nahrát</button>
-                <p id="uploadedFiles"></p>
+        <h2>Chat</h2>
+        <input type="text" id="userInput" placeholder="Zadej otázku...">
+        <button onclick="sendMessage()">Odeslat</button>
 
-                <h2>Chat</h2>
-                <input type="text" id="userInput" placeholder="Zadej otázku...">
-                <button onclick="sendMessage()">Odeslat</button>
-                <p id="response"></p>
-            </div>
+        <p id="response"></p>
 
-            <h2>Vyhledávání</h2>
-            <input type="text" id="searchInput" placeholder="Zadejte klíčové slovo">
-            <button onclick="searchKeyword()">Hledat</button>
-            <div id="searchResults"></div>
-        </div>
+        <h2>Přidat webovou stránku</h2>
+        <input type="text" id="newWebpageUrl" placeholder="Vložte URL">
+        <button onclick="addWebpage()">Přidat</button>
+
+        <h2>Sledované webové stránky</h2>
+        <ul id="webpageList"></ul>
+
+        <h2>Seznam dokumentů</h2>
+        <div id="documentList"></div>
     </div>
 
     <script>
-        let apiUrl = "http://127.0.0.1:8000"; 
+        let apiUrl = "https://chatbot-ybmh.onrender.com"; 
+        let uploadedFiles = [];
 
-        // Načte existující stránky při načtení stránky
-        async function loadWebpages() {
-            let response = await fetch(`${apiUrl}/webpages/`);
-            let webpages = await response.json();
-            let webpageList = document.getElementById("webpageList");
-            webpageList.innerHTML = "";
+        async function uploadFiles() {
+            let fileInput = document.getElementById("fileInput").files;
+            if (fileInput.length === 0) {
+                alert("Vyber alespoň jeden soubor.");
+                return;
+            }
 
-            webpages.forEach(url => {
-                let li = document.createElement("li");
-                li.innerHTML = `<strong>${url}</strong> 
-                                <button onclick="loadDocuments('${url}')">Načíst dokumenty</button>
-                                <ul id="documents-${url.replace(/\W/g, '')}"></ul>`;
-                webpageList.appendChild(li);
-            });
+            let formData = new FormData();
+            for (let file of fileInput) {
+                formData.append("files", file);
+            }
+
+            try {
+                let response = await fetch(`${apiUrl}/upload/`, {
+                    method: "POST",
+                    body: formData
+                });
+
+                let result = await response.json();
+                if (result.filenames) {
+                    uploadedFiles = result.filenames;
+                    document.getElementById("uploadedFiles").innerText = "Nahráno: " + uploadedFiles.join(", ");
+                    alert("Soubory nahrány!");
+                } else {
+                    alert("Chyba při nahrávání: " + (result.error || "Neznámá chyba."));
+                }
+            } catch (error) {
+                alert("Chyba při komunikaci se serverem.");
+            }
+        }
+
+        async function sendMessage() {
+            let userInput = document.getElementById("userInput").value;
+            if (uploadedFiles.length === 0) {
+                alert("Nejdříve nahraj soubory.");
+                return;
+            }
+            if (!userInput.trim()) {
+                alert("Zadej otázku.");
+                return;
+            }
+
+            let formData = new FormData();
+            formData.append("filenames", uploadedFiles.join(","));
+            formData.append("user_input", userInput);
+
+            let response = await fetch(`${apiUrl}/chat/`, { method: "POST", body: formData });
+            let result = await response.json();
+            document.getElementById("response").innerText = result.response || "Chyba při zpracování.";
         }
 
         async function addWebpage() {
@@ -74,31 +157,45 @@
 
             let result = await response.json();
             if (result.message === "Stránka přidána") {
-                document.getElementById("newWebpageUrl").value = ""; // Vyčistit pole
-                loadWebpages(); // Znovu načíst seznam
+                document.getElementById("newWebpageUrl").value = "";
+                loadWebpages(); // Aktualizuje seznam webů
             } else {
                 alert("Chyba při přidávání stránky.");
             }
         }
 
+        async function loadWebpages() {
+            let response = await fetch(`${apiUrl}/webpages/`);
+            let webpages = await response.json();
+            let webpageList = document.getElementById("webpageList");
+            webpageList.innerHTML = "";
+
+            webpages.forEach(url => {
+                let li = document.createElement("li");
+                li.innerHTML = `<strong>${url}</strong> 
+                                <button onclick="loadDocuments('${url}')">Načíst dokumenty</button>`;
+                webpageList.appendChild(li);
+            });
+        }
+
         async function loadDocuments(url) {
             let response = await fetch(`${apiUrl}/scrape/?url=${encodeURIComponent(url)}`);
             let result = await response.json();
-            let docList = document.getElementById(`documents-${url.replace(/\W/g, '')}`);
-            docList.innerHTML = "";
+            let documentList = document.getElementById("documentList");
+            documentList.innerHTML = `<h3>Dokumenty z ${url}</h3>`;
 
             result.forEach(link => {
-                let li = document.createElement("li");
+                let p = document.createElement("p");
                 let a = document.createElement("a");
                 a.href = link;
                 a.target = "_blank";
                 a.innerText = link;
-                li.appendChild(a);
-                docList.appendChild(li);
+                p.appendChild(a);
+                documentList.appendChild(p);
             });
         }
 
-        // Načte seznam webových stránek při spuštění
+        // Načte seznam webů po načtení stránky
         loadWebpages();
     </script>
 
