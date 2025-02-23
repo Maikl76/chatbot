@@ -31,6 +31,34 @@ templates = Jinja2Templates(directory="templates")
 # Servírování statických souborů (např. CSS, JS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# ✅ Hlavní stránka (vrací seznam webů do šablony)
+@app.get("/", response_class=HTMLResponse)
+async def serve_home(request: Request):
+    session = SessionLocal()
+    webpages = [webpage.url for webpage in session.query(WebPage).all()]
+    session.close()
+    return templates.TemplateResponse("index.html", {"request": request, "webpages": webpages})
+
+# ✅ Přidání nové webové stránky (správně ukládá do databáze)
+@app.post("/add_webpage/")
+async def add_webpage(url: str = Form(...)):
+    session = SessionLocal()
+    exists = session.query(WebPage).filter(WebPage.url == url).first()
+    if not exists:
+        webpage = WebPage(url=url)
+        session.add(webpage)
+        session.commit()
+    session.close()
+    return {"message": "Stránka přidána", "url": url}
+
+# ✅ Načtení seznamu sledovaných webových stránek
+@app.get("/webpages/")
+async def get_webpages():
+    session = SessionLocal()
+    webpages = [webpage.url for webpage in session.query(WebPage).all()]
+    session.close()
+    return webpages
+
 # ✅ Funkce pro skenování PDF/DOCX odkazů na webových stránkách
 def scrape_webpage_links(url):
     response = requests.get(url)
@@ -44,35 +72,14 @@ def scrape_webpage_links(url):
         return full_links
     return []
 
-# ✅ Hlavní stránka
-@app.get("/", response_class=HTMLResponse)
-async def serve_home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-# ✅ API pro získání seznamu webových stránek
-@app.get("/webpages/")
-async def get_webpages():
-    session = SessionLocal()
-    webpages = session.query(WebPage.url).all()
-    session.close()
-    return [url[0] for url in webpages]
-
-# ✅ Přidání nové webové stránky
-@app.post("/add_webpage/")
-async def add_webpage(url: str = Form(...)):
-    session = SessionLocal()
-    webpage = WebPage(url=url)
-    session.merge(webpage)  # Pokud URL existuje, aktualizuje ji, jinak přidá novou
-    session.commit()
-    session.close()
-    return {"message": "Stránka přidána", "url": url}
-
-# ✅ Načtení dokumentů ze sledovaných webových stránek
+# ✅ Načtení dokumentů z dané stránky
 @app.get("/scrape/")
 async def scrape(url: str):
     return scrape_webpage_links(url)
 
-# ✅ Spuštění aplikace
+# ✅ Spuštění aplikace (správně nastaví port pro Render)
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    import os
+    port = int(os.environ.get("PORT", 8000))  # Používá správný port pro Render
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=True)
